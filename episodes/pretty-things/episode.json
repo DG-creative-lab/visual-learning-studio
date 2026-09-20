@@ -1,0 +1,106 @@
+{
+  "schemaVersion": "visual-learning.episode-project/v1",
+  "id": "episode.pretty-things.v1",
+  "title": "Beyond Functionality: What Makes an AI Product Feel Good to Use?",
+  "source": {
+    "records": [
+      {
+        "id": "source.design-of-everyday-things",
+        "versionId": "source.design-of-everyday-things.2002-currency",
+        "contentDigest": "c66fb56df6703c3f8f6c6ffe8ff5d229fd7e50f03b074160e9314b6add3fbd7c",
+        "kind": "book",
+        "title": "The Design of Everyday Things",
+        "authors": ["Donald A. Norman"],
+        "editionOrVersion": "Currency edition with the 2002 preface",
+        "publicationDate": "2002",
+        "publisherOrJournal": "Currency / Doubleday",
+        "accessStatus": "owner_supplied",
+        "rightsStatus": "needs_review",
+        "rightsNote": "The local copy is available for private analysis. Public commercial treatment, quotations, and any reused figures require a separate rights review.",
+        "coverage": {
+          "scope": "declared_selection",
+          "mode": "partial",
+          "inspected": "The contents and 2002 preface were inspected; searchable text was confirmed across the 270-page PDF.",
+          "exclusions": [
+            "Only sections selected for the episode's declared thematic scope will enter the first synthesis pass."
+          ]
+        }
+      },
+      {
+        "id": "source.about-face-fourth-edition",
+        "versionId": "source.about-face.2014-fourth-edition",
+        "contentDigest": "8cacd91ab4f8f165c2d84af551405f26de781dffaaaef7fd3f21c9ff9e9676c5",
+        "kind": "book",
+        "title": "About Face: The Essentials of Interaction Design",
+        "authors": ["Alan Cooper", "Robert Reimann", "David Cronin", "Christopher Noessel"],
+        "editionOrVersion": "Fourth edition, ISBN 978-1-118-76657-6",
+        "publicationDate": "2014",
+        "publisherOrJournal": "John Wiley & Sons, Inc.",
+        "accessStatus": "owner_supplied",
+        "rightsStatus": "needs_review",
+        "rightsNote": "The local copy is available for private analysis. Public commercial treatment, quotations, and any reused figures require a separate rights review.",
+        "coverage": {
+          "scope": "declared_selection",
+          "mode": "partial",
+          "inspected": "The title page, copyright page, contents, and opening material were inspected in the 722-page PDF.",
+          "exclusions": [
+            "Only sections selected for the episode's declared thematic scope will enter the first synthesis pass."
+          ]
+        }
+      },
+      {
+        "id": "source.emotional-design",
+        "versionId": "source.emotional-design.2004-basic-books",
+        "contentDigest": "e440f928952af1ed841002d882e700891b53159501c7e950f860f59a45be6dba",
+        "kind": "book",
+        "title": "Emotional Design: Why We Love (or Hate) Everyday Things",
+        "authors": ["Donald A. Norman"],
+        "editionOrVersion": "2004 Basic Books edition, ISBN 0-465-05135-9",
+        "publicationDate": "2004",
+        "publisherOrJournal": "Basic Books, a member of the Perseus Books Group",
+        "accessStatus": "owner_supplied",
+        "rightsStatus": "needs_review",
+        "rightsNote": "The local copy is available for private analysis. Public commercial treatment, quotations, and any reused figures require a separate rights review.",
+        "coverage": {
+          "scope": "declared_selection",
+          "mode": "partial",
+          "inspected": "PDF metadata, contents, copyright page, and opening/prologue pages were inspected; text extraction was confirmed across all 268 pages.",
+          "exclusions": [
+            "Only sections selected for the episode's declared thematic scope will enter the first synthesis pass."
+          ]
+        }
+      }
+    ],
+    "claims": []
+  },
+  "editorial": {
+    "audience": {
+      "primary": "Product designers and AI engineers building human-facing AI products",
+      "priorKnowledge": "Experienced with digital products but not assumed to know interaction or emotional-design theory",
+      "decisionContext": "Design an AI product that people can understand, use to accomplish a real goal, and want to return to"
+    },
+    "learningObjective": {
+      "id": "objective.understand-accomplish-care",
+      "outcome": "Explain and apply the Understand, Accomplish, Care framework synthesized from the three declared sources",
+      "evidenceOfLearning": "The viewer can use the framework to diagnose one unfamiliar AI-product experience and identify a concrete design improvement"
+    },
+    "narrative": [],
+    "script": []
+  },
+  "distribution": {
+    "audiencePromise": {
+      "viewer": "Product designers and AI engineers building human-facing AI products",
+      "problem": "A technically capable AI product can still be confusing, poorly aligned with user goals, or emotionally unrewarding.",
+      "promisedOutcome": "A source-grounded three-part framework for making AI products understandable, useful, and worth returning to.",
+      "boundary": "The episode is a bounded thematic synthesis and reading guide, not a complete substitute for the three books or a guarantee of product success.",
+      "subscriptionReason": "Follow the complete journey from AI-product design through testing, adoption, marketing, and go-to-market decisions."
+    },
+    "packagingCandidates": [],
+    "derivatives": []
+  },
+  "production": {
+    "scenes": [],
+    "assets": []
+  },
+  "release": {}
+}

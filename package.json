@@ -1,0 +1,31 @@
+{
+  "name": "visual-learning-studio",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "description": "A source-grounded pipeline for producing visual learning episodes from books and papers.",
+  "type": "module",
+  "packageManager": "pnpm@10.33.0",
+  "engines": {
+    "node": ">=24 <26",
+    "pnpm": ">=10 <11"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "check": "pnpm format:check && pnpm typecheck && pnpm test",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "prototype": "pnpm build && node dist/cli.js inspect episodes/pretty-things/episode.json episodes/pretty-things/private/source.local.json",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "zod": "^3.24.3"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "prettier": "^3.3.3",
+    "typescript": "^5.6.2",
+    "vitest": "^2.1.9"
+  }
+}
