@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { JsonLocalBindingsRepository } from './adapters/jsonLocalBindingsRepository.js';
 import { JsonEpisodeRepository } from './adapters/jsonEpisodeRepository.js';
+import { FileArtifactProbe } from './adapters/fileArtifactProbe.js';
 import { PdfInfoDocumentProbe } from './adapters/pdfInfoDocumentProbe.js';
 import { formatInspection } from './application/formatInspection.js';
 import { inspectEpisode } from './application/inspectEpisode.js';
@@ -18,6 +19,7 @@ async function main(): Promise<void> {
     episodes: new JsonEpisodeRepository(),
     bindings: new JsonLocalBindingsRepository(),
     documents: new PdfInfoDocumentProbe(),
+    artifacts: new FileArtifactProbe(),
   });
 
   process.stdout.write(`${formatInspection(inspection)}\n`);

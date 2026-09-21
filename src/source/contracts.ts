@@ -24,9 +24,41 @@ export const sourceCoverageSchema = z
     scope: z.enum(['whole_source', 'declared_selection']),
     mode: z.enum(['full', 'partial', 'structure_only']),
     inspected: z.string().min(1),
+    selectedSections: z
+      .array(
+        z
+          .object({
+            locator: z.string().min(1).max(300),
+            rationale: z.string().min(1).max(1_000),
+          })
+          .strict(),
+      )
+      .max(64)
+      .default([]),
     exclusions: z.array(z.string().min(1)).max(64).default([]),
   })
-  .strict();
+  .strict()
+  .superRefine((coverage, context) => {
+    if (
+      coverage.scope === 'declared_selection' &&
+      coverage.mode === 'full' &&
+      coverage.selectedSections.length === 0
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Full coverage of a declared selection requires at least one selected section.',
+        path: ['selectedSections'],
+      });
+    }
+
+    if (coverage.scope === 'whole_source' && coverage.selectedSections.length > 0) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'Whole-source coverage must not define selected sections.',
+        path: ['selectedSections'],
+      });
+    }
+  });
 
 export const sourceRecordSchema = z
   .object({
@@ -93,6 +125,30 @@ export const claimRecordSchema = z
         message: 'Source claims and evidence require at least one exact locator.',
         path: ['locators'],
       });
+    }
+
+    const declaredSourceIds = new Set(claim.sourceIds);
+    const locatedSourceIds = new Set(claim.locators.map((locator) => locator.sourceId));
+    if (requiresProvenance) {
+      for (const [index, sourceId] of claim.sourceIds.entries()) {
+        if (!locatedSourceIds.has(sourceId)) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: `Declared source ${sourceId} requires at least one exact locator.`,
+            path: ['sourceIds', index],
+          });
+        }
+      }
+    }
+
+    for (const [index, locator] of claim.locators.entries()) {
+      if (!declaredSourceIds.has(locator.sourceId)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Locator source ${locator.sourceId} is not declared in the claim's sourceIds.`,
+          path: ['locators', index, 'sourceId'],
+        });
+      }
     }
   });
 

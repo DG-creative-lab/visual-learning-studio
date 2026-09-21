@@ -1,12 +1,22 @@
-import { createHash } from 'node:crypto';
 import { z } from 'zod';
+import { digestJson } from '../shared/digest.js';
 import { stableIdSchema } from '../shared/identity.js';
 
 export const releaseCandidateSchema = z
   .object({
     id: stableIdSchema,
     videoPath: z.string().min(1).max(2_000),
+    // Optional only for compatibility with v1 manifests written before artifact binding existed.
+    // Readiness treats an absent digest as unverified and will not authorize release.
+    videoDigest: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/)
+      .optional(),
     captionsPath: z.string().min(1).max(2_000),
+    captionsDigest: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/)
+      .optional(),
     title: z.string().min(1).max(100),
     description: z.string().min(1).max(5_000),
     sourcePageUrl: z.string().url(),
@@ -41,26 +51,8 @@ export const releaseModuleSchema = z
   })
   .strict();
 
-function canonicalize(value: unknown): unknown {
-  if (Array.isArray(value)) {
-    return value.map(canonicalize);
-  }
-
-  if (value !== null && typeof value === 'object') {
-    return Object.fromEntries(
-      Object.entries(value)
-        .sort(([left], [right]) => left.localeCompare(right))
-        .map(([key, nested]) => [key, canonicalize(nested)]),
-    );
-  }
-
-  return value;
-}
-
 export function releaseCandidateDigest(candidate: ReleaseCandidate): string {
-  return createHash('sha256')
-    .update(JSON.stringify(canonicalize(candidate)))
-    .digest('hex');
+  return digestJson(candidate);
 }
 
 export type ReleaseCandidate = z.infer<typeof releaseCandidateSchema>;

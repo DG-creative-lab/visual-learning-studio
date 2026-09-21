@@ -1,10 +1,25 @@
 import { describe, expect, it } from 'vitest';
+import { scriptSegmentsDigest, type ScriptSegment } from '../src/editorial/contracts.js';
+import { voiceRenderRequestDigest } from '../src/ports/externalEffects.js';
 import { releaseCandidateDigest, type ReleaseCandidate } from '../src/release/contracts.js';
 import { claimRecordSchema } from '../src/source/contracts.js';
 import { episodeProjectSchema, type EpisodeProject } from '../src/workflow/project.js';
-import { deriveEpisodeReadiness } from '../src/workflow/readiness.js';
+import { deriveEpisodeReadiness, type ReadinessEvidence } from '../src/workflow/readiness.js';
 
 const sourceDigest = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+const audioDigest = 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc';
+
+function completeScript(): ScriptSegment[] {
+  return [
+    {
+      id: 'script.central-model',
+      beatId: 'beat.central-model',
+      narration: 'A reviewed narration grounded in the verified claim.',
+      claimIds: ['claim.affect-and-use'],
+      intendedSeconds: 20,
+    },
+  ];
+}
 
 function observedSource() {
   return {
@@ -18,14 +33,51 @@ function observedSource() {
       },
     },
     documentErrors: {},
+    artifacts: {
+      'artifacts/pretty-things.mp4': {
+        contentDigest: 'dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd',
+        byteSize: 1_000_000,
+        mediaKind: 'video' as const,
+        durationSeconds: 20,
+      },
+      'artifacts/pretty-things.vtt': {
+        contentDigest: 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',
+        byteSize: 10_000,
+        mediaKind: 'captions' as const,
+        cueCount: 1,
+      },
+      'audio/voice.m4a': {
+        contentDigest: audioDigest,
+        byteSize: 100_000,
+        mediaKind: 'audio' as const,
+        durationSeconds: 20,
+      },
+    },
+    voiceRenderReceipts: {
+      'audio/voice.m4a': {
+        requestDigest: voiceRenderRequestDigest({
+          episodeId: 'episode.pretty-things.v1',
+          script: completeScript(),
+          scriptDigest: scriptSegmentsDigest(completeScript()),
+          voiceProfileId: 'voice.test',
+          outputPath: 'audio/voice.m4a',
+        }),
+        outputPath: 'audio/voice.m4a',
+        outputContentDigest: audioDigest,
+        provider: 'prepared-test-voice',
+      },
+    },
   };
 }
 
 function completeProject(): EpisodeProject {
+  const script = completeScript();
   const candidate: ReleaseCandidate = {
     id: 'release.pretty-things.v1',
     videoPath: 'artifacts/pretty-things.mp4',
+    videoDigest: 'dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd',
     captionsPath: 'artifacts/pretty-things.vtt',
+    captionsDigest: 'eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee',
     title: 'Why Pretty Things Work Better',
     description: 'A source-grounded visual reading guide.',
     sourcePageUrl: 'https://example.com/sources/pretty-things',
@@ -98,15 +150,7 @@ function completeProject(): EpisodeProject {
           claimIds: ['claim.affect-and-use'],
         },
       ],
-      script: [
-        {
-          id: 'script.central-model',
-          beatId: 'beat.central-model',
-          narration: 'A reviewed narration grounded in the verified claim.',
-          claimIds: ['claim.affect-and-use'],
-          intendedSeconds: 20,
-        },
-      ],
+      script,
     },
     distribution: {
       audiencePromise: {
@@ -160,13 +204,13 @@ function completeProject(): EpisodeProject {
         narratorMode: 'generated',
         provider: 'prepared-test-voice',
         voiceProfileId: 'voice.test',
-        scriptDigest: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+        scriptDigest: scriptSegmentsDigest(script),
         outputPath: 'audio/voice.m4a',
       },
       audio: {
         path: 'audio/voice.m4a',
         origin: 'generated',
-        contentDigest: 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
+        contentDigest: audioDigest,
         durationSeconds: 20,
       },
       scenes: [
@@ -222,6 +266,7 @@ describe('episode readiness', () => {
       scope: 'whole_source',
       mode: 'partial',
       inspected: 'Metadata and contents only.',
+      selectedSections: [],
       exclusions: ['Full body synthesis pending.'],
     };
     project.source.claims = [];
@@ -268,6 +313,8 @@ describe('episode readiness', () => {
         },
       },
       documentErrors: {},
+      artifacts: {},
+      voiceRenderReceipts: {},
     });
 
     expect(readiness.currentStage).toBe('registered');
@@ -294,6 +341,253 @@ describe('episode readiness', () => {
     expect(readiness.blockers.map((item) => item.code)).toContain(
       'release.approval_digest_mismatch',
     );
+  });
+
+  it('invalidates approval when approved video bytes are replaced at the same path', () => {
+    const project = completeProject();
+    if (project.release.candidate === undefined) {
+      throw new Error('Fixture candidate is required.');
+    }
+    project.release.candidate.videoDigest =
+      'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff';
+
+    const readiness = deriveEpisodeReadiness(project, observedSource());
+
+    expect(readiness.currentStage).toBe('production_ready');
+    expect(readiness.blockers.map((item) => item.code)).toContain(
+      'release.approval_digest_mismatch',
+    );
+  });
+
+  it('does not accept self-reported release digests without artifact observations', () => {
+    const completeEvidence = observedSource();
+    const evidence: ReadinessEvidence = {
+      ...completeEvidence,
+      artifacts: {
+        'audio/voice.m4a': completeEvidence.artifacts['audio/voice.m4a'],
+      },
+    };
+
+    const readiness = deriveEpisodeReadiness(completeProject(), evidence);
+
+    expect(readiness.currentStage).toBe('production_ready');
+    expect(readiness.blockers.map((item) => item.code)).toContain('release.artifact_unobserved');
+  });
+
+  it('blocks production when the voice plan was prepared from a stale script', () => {
+    const project = completeProject();
+    if (project.production.voicePlan === undefined) {
+      throw new Error('Fixture voice plan is required.');
+    }
+    project.production.voicePlan.scriptDigest =
+      'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff';
+
+    const readiness = deriveEpisodeReadiness(project, observedSource());
+
+    expect(readiness.currentStage).toBe('scenes_ready');
+    expect(readiness.blockers.map((item) => item.code)).toContain(
+      'voice_plan.script_digest_mismatch',
+    );
+  });
+
+  it('blocks production when a current plan retains audio rendered from a stale script', () => {
+    const project = completeProject();
+    project.editorial.script[0]!.narration = 'A revised narration that must be rendered again.';
+    if (project.production.voicePlan === undefined) {
+      throw new Error('Fixture voice plan is required.');
+    }
+    project.production.voicePlan.scriptDigest = scriptSegmentsDigest(project.editorial.script);
+
+    const readiness = deriveEpisodeReadiness(project, observedSource());
+
+    expect(readiness.currentStage).toBe('scenes_ready');
+    expect(readiness.blockers.map((item) => item.code)).toContain(
+      'audio.render_receipt_request_mismatch',
+    );
+  });
+
+  it('blocks a valid voice receipt replayed from another episode or voice profile', () => {
+    const evidence = observedSource();
+    evidence.voiceRenderReceipts['audio/voice.m4a'].requestDigest = voiceRenderRequestDigest({
+      episodeId: 'episode.other.v1',
+      script: completeScript(),
+      scriptDigest: scriptSegmentsDigest(completeScript()),
+      voiceProfileId: 'voice.other',
+      outputPath: 'audio/voice.m4a',
+    });
+
+    const readiness = deriveEpisodeReadiness(completeProject(), evidence);
+
+    expect(readiness.currentStage).toBe('scenes_ready');
+    expect(readiness.blockers.map((item) => item.code)).toContain(
+      'audio.render_receipt_request_mismatch',
+    );
+  });
+
+  it('blocks production when observed audio bytes do not match the render output', () => {
+    const evidence = observedSource();
+    evidence.artifacts['audio/voice.m4a'] = {
+      contentDigest: 'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff',
+      byteSize: 100_000,
+      mediaKind: 'audio',
+      durationSeconds: 20,
+    };
+
+    const readiness = deriveEpisodeReadiness(completeProject(), evidence);
+
+    expect(readiness.currentStage).toBe('scenes_ready');
+    expect(readiness.blockers.map((item) => item.code)).toContain('audio.artifact_digest_mismatch');
+  });
+
+  it('blocks artifacts whose observed media kind does not match their role', () => {
+    const observed = observedSource();
+    const evidence: ReadinessEvidence = {
+      ...observed,
+      artifacts: {
+        ...observed.artifacts,
+        'audio/voice.m4a': {
+          ...observed.artifacts['audio/voice.m4a'],
+          mediaKind: 'video',
+        },
+        'artifacts/pretty-things.mp4': {
+          ...observed.artifacts['artifacts/pretty-things.mp4'],
+          mediaKind: 'audio',
+        },
+      },
+    };
+
+    const readiness = deriveEpisodeReadiness(completeProject(), evidence);
+
+    expect(readiness.currentStage).toBe('scenes_ready');
+    expect(readiness.blockers.map((item) => item.code)).toContain('audio.artifact_format_invalid');
+    expect(readiness.blockers.map((item) => item.code)).toContain(
+      'release.artifact_format_invalid',
+    );
+  });
+
+  it('blocks media without positive duration and captions without a valid cue', () => {
+    const observed = observedSource();
+    const { durationSeconds: ignoredAudioDuration, ...audioWithoutDuration } =
+      observed.artifacts['audio/voice.m4a'];
+    const { durationSeconds: ignoredVideoDuration, ...videoWithoutDuration } =
+      observed.artifacts['artifacts/pretty-things.mp4'];
+    const { cueCount: ignoredCueCount, ...captionsWithoutCues } =
+      observed.artifacts['artifacts/pretty-things.vtt'];
+    void ignoredAudioDuration;
+    void ignoredVideoDuration;
+    void ignoredCueCount;
+    const evidence: ReadinessEvidence = {
+      ...observed,
+      artifacts: {
+        ...observed.artifacts,
+        'audio/voice.m4a': audioWithoutDuration,
+        'artifacts/pretty-things.mp4': videoWithoutDuration,
+        'artifacts/pretty-things.vtt': captionsWithoutCues,
+      },
+    };
+
+    const readiness = deriveEpisodeReadiness(completeProject(), evidence);
+
+    expect(readiness.currentStage).toBe('scenes_ready');
+    expect(readiness.blockers.map((item) => item.code)).toContain('audio.artifact_unusable');
+    expect(
+      readiness.blockers.filter((item) => item.code === 'release.artifact_unusable'),
+    ).toHaveLength(2);
+  });
+
+  it('blocks empty audio even when its digest and receipt agree', () => {
+    const project = completeProject();
+    const emptyDigest = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
+    if (project.production.audio === undefined) {
+      throw new Error('Fixture audio is required.');
+    }
+    project.production.audio.contentDigest = emptyDigest;
+    const evidence = observedSource();
+    evidence.artifacts['audio/voice.m4a'] = {
+      contentDigest: emptyDigest,
+      byteSize: 0,
+      mediaKind: 'audio',
+      durationSeconds: 20,
+    };
+    evidence.voiceRenderReceipts['audio/voice.m4a'].outputContentDigest = emptyDigest;
+
+    const readiness = deriveEpisodeReadiness(project, evidence);
+
+    expect(readiness.currentStage).toBe('scenes_ready');
+    expect(readiness.blockers.map((item) => item.code)).toContain('audio.artifact_empty');
+  });
+
+  it('blocks empty release video and captions even when their digests agree', () => {
+    const project = completeProject();
+    const emptyDigest = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
+    if (project.release.candidate === undefined) {
+      throw new Error('Fixture candidate is required.');
+    }
+    project.release.candidate.videoDigest = emptyDigest;
+    project.release.candidate.captionsDigest = emptyDigest;
+    project.release.approval = {
+      candidateId: project.release.candidate.id,
+      approvedDigest: releaseCandidateDigest(project.release.candidate),
+      approvedBy: 'owner',
+      approvedAt: '2026-09-20T12:00:00.000Z',
+    };
+    const evidence = observedSource();
+    evidence.artifacts['artifacts/pretty-things.mp4'] = {
+      contentDigest: emptyDigest,
+      byteSize: 0,
+      mediaKind: 'video',
+      durationSeconds: 20,
+    };
+    evidence.artifacts['artifacts/pretty-things.vtt'] = {
+      contentDigest: emptyDigest,
+      byteSize: 0,
+      mediaKind: 'captions',
+      cueCount: 1,
+    };
+
+    const readiness = deriveEpisodeReadiness(project, evidence);
+
+    expect(readiness.currentStage).toBe('production_ready');
+    expect(
+      readiness.blockers.filter((item) => item.code === 'release.artifact_empty'),
+    ).toHaveLength(2);
+  });
+
+  it('parses legacy v1 release candidates but keeps missing digests unverified', () => {
+    const project = completeProject();
+    if (project.release.candidate === undefined) {
+      throw new Error('Fixture candidate is required.');
+    }
+    delete project.release.candidate.videoDigest;
+    delete project.release.candidate.captionsDigest;
+
+    const parsed = episodeProjectSchema.parse(project);
+    const readiness = deriveEpisodeReadiness(parsed, observedSource());
+
+    expect(parsed.schemaVersion).toBe('visual-learning.episode-project/v1');
+    expect(readiness.currentStage).toBe('production_ready');
+    expect(
+      readiness.blockers.filter((item) => item.code === 'release.artifact_digest_missing'),
+    ).toHaveLength(2);
+  });
+
+  it('blocks release when the selected packaging and release title diverge', () => {
+    const project = completeProject();
+    if (project.release.candidate === undefined) {
+      throw new Error('Fixture candidate is required.');
+    }
+    project.release.candidate.title = 'A different promise';
+    project.release.approval = {
+      candidateId: project.release.candidate.id,
+      approvedDigest: releaseCandidateDigest(project.release.candidate),
+      approvedBy: 'owner',
+      approvedAt: '2026-09-20T12:00:00.000Z',
+    };
+
+    const readiness = deriveEpisodeReadiness(project, observedSource());
+
+    expect(readiness.currentStage).toBe('production_ready');
+    expect(readiness.blockers.map((item) => item.code)).toContain('release.packaging_mismatch');
   });
 
   it('does not accept packaging that is unsupported by verified episode claims', () => {

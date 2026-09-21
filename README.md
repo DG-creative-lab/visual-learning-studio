@@ -131,6 +131,21 @@ pnpm prototype
 pnpm check
 ```
 
+Local inspection and verification require `pdfinfo`, `ffmpeg`, and `ffprobe` on `PATH`. Media
+artifacts are accepted only when `ffprobe` finds the expected stream with positive duration and a
+bounded `ffmpeg -xerror` pass decodes the complete payload. Caption files are parsed by FFmpeg's
+WebVTT or SRT demuxer through a bounded streaming decode and must produce at least one
+positive-duration cue with viewer-visible text.
+
+Pull requests run the same complete gate used locally:
+
+```bash
+make ci
+```
+
+The gate installs the locked dependency graph, checks formatting, type-checks, runs the
+invariant-focused test suite, and verifies the production build.
+
 The expected current state is `sources_ready`. The three exact PDFs have been identified and
 observed, but only preflight inspection has been performed. Selected-section coverage, claims,
 narrative, packaging, script, scenes, generated voice-over, render, and release approval are

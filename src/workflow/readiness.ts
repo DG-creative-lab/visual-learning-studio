@@ -1,4 +1,7 @@
 import type { DocumentObservation } from '../ports/documentProbe.js';
+import { scriptSegmentsDigest } from '../editorial/contracts.js';
+import type { ArtifactObservation, VoiceRenderReceipt } from '../ports/artifactProbe.js';
+import { voiceRenderRequestDigest } from '../ports/externalEffects.js';
 import { releaseCandidateDigest } from '../release/contracts.js';
 import type { EpisodeProject } from './project.js';
 
@@ -32,6 +35,8 @@ export interface EpisodeReadiness {
 export interface ReadinessEvidence {
   readonly documents: Readonly<Record<string, DocumentObservation>>;
   readonly documentErrors: Readonly<Record<string, string>>;
+  readonly artifacts: Readonly<Record<string, ArtifactObservation>>;
+  readonly voiceRenderReceipts: Readonly<Record<string, VoiceRenderReceipt>>;
 }
 
 function blocker(
@@ -354,7 +359,10 @@ function sceneBlockers(project: EpisodeProject): ReadinessBlocker[] {
   return blockers;
 }
 
-function productionBlockers(project: EpisodeProject): ReadinessBlocker[] {
+function productionBlockers(
+  project: EpisodeProject,
+  evidence: ReadinessEvidence,
+): ReadinessBlocker[] {
   const blockers: ReadinessBlocker[] = [];
 
   if (project.production.voicePlan === undefined) {
@@ -367,12 +375,140 @@ function productionBlockers(project: EpisodeProject): ReadinessBlocker[] {
     );
   }
 
+  if (
+    project.production.voicePlan !== undefined &&
+    project.production.voicePlan.scriptDigest !== scriptSegmentsDigest(project.editorial.script)
+  ) {
+    blockers.push(
+      blocker(
+        'production_ready',
+        'voice_plan.script_digest_mismatch',
+        'The voice-over plan is bound to a different narration script.',
+      ),
+    );
+  }
+
+  if (project.production.audio !== undefined) {
+    const { audio, voicePlan } = project.production;
+    const receipt = evidence.voiceRenderReceipts[audio.path];
+    const observation = evidence.artifacts[audio.path];
+
+    if (receipt === undefined) {
+      blockers.push(
+        blocker(
+          'production_ready',
+          'audio.render_receipt_unobserved',
+          'No trusted voice-production receipt binds the audio output to its input script.',
+        ),
+      );
+    } else {
+      if (
+        voicePlan !== undefined &&
+        receipt.requestDigest !==
+          voiceRenderRequestDigest({
+            episodeId: project.id,
+            script: project.editorial.script,
+            scriptDigest: voicePlan.scriptDigest,
+            voiceProfileId: voicePlan.voiceProfileId,
+            outputPath: voicePlan.outputPath,
+          })
+      ) {
+        blockers.push(
+          blocker(
+            'production_ready',
+            'audio.render_receipt_request_mismatch',
+            'The voice-production receipt was issued for a different episode, script, voice profile, or output path.',
+          ),
+        );
+      }
+
+      if (
+        receipt.outputPath !== audio.path ||
+        receipt.outputContentDigest !== audio.contentDigest ||
+        (voicePlan !== undefined && receipt.provider !== voicePlan.provider)
+      ) {
+        blockers.push(
+          blocker(
+            'production_ready',
+            'audio.render_receipt_output_mismatch',
+            'The voice-production receipt does not match the declared audio output.',
+          ),
+        );
+      }
+    }
+
+    if (observation === undefined) {
+      blockers.push(
+        blocker(
+          'production_ready',
+          'audio.artifact_unobserved',
+          'The audio output bytes have not been independently observed.',
+        ),
+      );
+    } else {
+      if (observation.byteSize <= 0) {
+        blockers.push(
+          blocker(
+            'production_ready',
+            'audio.artifact_empty',
+            'The independently observed audio artifact is empty.',
+          ),
+        );
+      }
+      if (observation.mediaKind !== 'audio') {
+        blockers.push(
+          blocker(
+            'production_ready',
+            'audio.artifact_format_invalid',
+            'The independently observed artifact is not valid audio.',
+          ),
+        );
+      }
+      if (
+        observation.mediaKind === 'audio' &&
+        (observation.durationSeconds === undefined || observation.durationSeconds <= 0)
+      ) {
+        blockers.push(
+          blocker(
+            'production_ready',
+            'audio.artifact_unusable',
+            'The independently observed audio has no playable stream with positive duration.',
+          ),
+        );
+      }
+      if (observation.contentDigest !== audio.contentDigest) {
+        blockers.push(
+          blocker(
+            'production_ready',
+            'audio.artifact_digest_mismatch',
+            'The independently observed audio bytes do not match the declared audio digest.',
+          ),
+        );
+      }
+    }
+  }
+
   if (project.production.audio === undefined) {
     blockers.push(
       blocker(
         'production_ready',
         'audio.none',
         'No generated or human-recorded voice-over artifact exists.',
+      ),
+    );
+  }
+
+  if (
+    project.production.voicePlan !== undefined &&
+    project.production.audio !== undefined &&
+    (project.production.voicePlan.outputPath !== project.production.audio.path ||
+      project.production.voicePlan.narratorMode !== project.production.audio.origin)
+  ) {
+    blockers.push(
+      blocker(
+        'production_ready',
+        'audio.voice_plan_mismatch',
+        'The observed audio does not match the path and origin declared by the voice-over plan.',
       ),
     );
   }
@@ -398,7 +534,7 @@ function productionBlockers(project: EpisodeProject): ReadinessBlocker[] {
   return blockers;
 }
 
-function releaseBlockers(project: EpisodeProject): ReadinessBlocker[] {
+function releaseBlockers(project: EpisodeProject, evidence: ReadinessEvidence): ReadinessBlocker[] {
   const blockers: ReadinessBlocker[] = [];
   const { candidate, approval } = project.release;
 
@@ -421,6 +557,93 @@ function releaseBlockers(project: EpisodeProject): ReadinessBlocker[] {
     return blockers;
   }
 
+  const releaseArtifacts = [
+    { label: 'video', path: candidate.videoPath, digest: candidate.videoDigest, kind: 'video' },
+    {
+      label: 'captions',
+      path: candidate.captionsPath,
+      digest: candidate.captionsDigest,
+      kind: 'captions',
+    },
+  ];
+  for (const artifact of releaseArtifacts) {
+    if (artifact.digest === undefined) {
+      blockers.push(
+        blocker(
+          'release_approved',
+          'release.artifact_digest_missing',
+          `The legacy release ${artifact.label} at ${artifact.path} has no trusted content digest.`,
+        ),
+      );
+      continue;
+    }
+
+    const observation = evidence.artifacts[artifact.path];
+    if (observation === undefined) {
+      blockers.push(
+        blocker(
+          'release_approved',
+          'release.artifact_unobserved',
+          `The release ${artifact.label} at ${artifact.path} has not been independently observed.`,
+        ),
+      );
+    } else {
+      if (observation.byteSize <= 0) {
+        blockers.push(
+          blocker(
+            'release_approved',
+            'release.artifact_empty',
+            `The observed release ${artifact.label} is empty.`,
+          ),
+        );
+      }
+      if (observation.mediaKind !== artifact.kind) {
+        blockers.push(
+          blocker(
+            'release_approved',
+            'release.artifact_format_invalid',
+            `The observed release ${artifact.label} has the wrong media format.`,
+          ),
+        );
+      }
+      if (
+        artifact.kind === 'video' &&
+        observation.mediaKind === 'video' &&
+        (observation.durationSeconds === undefined || observation.durationSeconds <= 0)
+      ) {
+        blockers.push(
+          blocker(
+            'release_approved',
+            'release.artifact_unusable',
+            'The observed release video has no playable video stream with positive duration.',
+          ),
+        );
+      }
+      if (
+        artifact.kind === 'captions' &&
+        observation.mediaKind === 'captions' &&
+        (observation.cueCount === undefined || observation.cueCount <= 0)
+      ) {
+        blockers.push(
+          blocker(
+            'release_approved',
+            'release.artifact_unusable',
+            'The observed release captions contain no positive-duration cue with viewer-visible text.',
+          ),
+        );
+      }
+      if (observation.contentDigest !== artifact.digest) {
+        blockers.push(
+          blocker(
+            'release_approved',
+            'release.artifact_digest_mismatch',
+            `The observed release ${artifact.label} does not match its declared content digest.`,
+          ),
+        );
+      }
+    }
+  }
+
   const selectedPackaging = project.distribution.packagingCandidates.find(
     (item) => item.status === 'selected',
   );
@@ -430,6 +653,19 @@ function releaseBlockers(project: EpisodeProject): ReadinessBlocker[] {
         'release_approved',
         'release.packaging_mismatch',
         'The release title does not match the selected, claim-supported packaging candidate.',
+      ),
+    );
+  }
+
+  if (
+    project.production.renderPlan === undefined ||
+    candidate.videoPath !== project.production.renderPlan.outputPath
+  ) {
+    blockers.push(
+      blocker(
+        'release_approved',
+        'release.render_path_mismatch',
+        'The release candidate does not identify the output of the approved render plan.',
       ),
     );
   }
@@ -508,8 +744,8 @@ export function deriveEpisodeReadiness(
     ...packagingBlockers(project),
     ...scriptBlockers(project),
     ...sceneBlockers(project),
-    ...productionBlockers(project),
-    ...releaseBlockers(project),
+    ...productionBlockers(project, evidence),
+    ...releaseBlockers(project, evidence),
     ...publicationBlockers(project),
   ];
 
