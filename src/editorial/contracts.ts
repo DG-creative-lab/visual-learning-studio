@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { digestJson } from '../shared/digest.js';
 import { duplicates, stableIdSchema } from '../shared/identity.js';
 
 export const audienceSchema = z
@@ -76,3 +77,7 @@ export const editorialModuleSchema = z
 export type EditorialModule = z.infer<typeof editorialModuleSchema>;
 export type NarrativeBeat = z.infer<typeof narrativeBeatSchema>;
 export type ScriptSegment = z.infer<typeof scriptSegmentSchema>;
+
+export function scriptSegmentsDigest(script: readonly ScriptSegment[]): string {
+  return digestJson(script);
+}

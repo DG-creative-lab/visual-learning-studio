@@ -1,5 +1,9 @@
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { inspectEpisode } from '../src/application/inspectEpisode.js';
+import type { ArtifactProbe, ArtifactProbeRequest } from '../src/ports/artifactProbe.js';
 import type { DocumentProbe } from '../src/ports/documentProbe.js';
 import type { EpisodeRepository, LoadedEpisodeProject } from '../src/ports/episodeRepository.js';
 import type { LocalBindingsRepository } from '../src/ports/localBindingsRepository.js';
@@ -9,10 +13,15 @@ import { episodeProjectSchema } from '../src/workflow/project.js';
 const sourceDigest = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 
 class PreparedEpisodeRepository implements EpisodeRepository {
+  constructor(
+    private readonly directory: string,
+    private readonly audioPath = 'audio/voice.m4a',
+  ) {}
+
   async load(): Promise<LoadedEpisodeProject> {
     return {
-      manifestPath: '/tmp/episode/episode.json',
-      directory: '/tmp/episode',
+      manifestPath: path.join(this.directory, 'episode.json'),
+      directory: this.directory,
       project: episodeProjectSchema.parse({
         schemaVersion: 'visual-learning.episode-project/v1',
         id: 'episode.prototype.v1',
@@ -64,7 +73,16 @@ class PreparedEpisodeRepository implements EpisodeRepository {
           packagingCandidates: [],
           derivatives: [],
         },
-        production: { scenes: [], assets: [] },
+        production: {
+          audio: {
+            path: this.audioPath,
+            origin: 'generated',
+            contentDigest: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+            durationSeconds: 20,
+          },
+          scenes: [],
+          assets: [],
+        },
         release: {},
       }),
     };
@@ -81,8 +99,10 @@ class PreparedLocalBindingsRepository implements LocalBindingsRepository {
 }
 
 class PreparedDocumentProbe implements DocumentProbe {
+  constructor(private readonly directory: string) {}
+
   async inspectPdf(absolutePath: string) {
-    expect(absolutePath).toBe('/tmp/episode/source.pdf');
+    expect(absolutePath).toBe(path.join(this.directory, 'source.pdf'));
     return {
       contentDigest: sourceDigest,
       byteSize: 10_000,
@@ -93,15 +113,98 @@ class PreparedDocumentProbe implements DocumentProbe {
   }
 }
 
+class PreparedArtifactProbe implements ArtifactProbe {
+  readonly requests: ArtifactProbeRequest[] = [];
+
+  async observe(request: ArtifactProbeRequest) {
+    this.requests.push(request);
+    return {
+      contentDigest: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+      byteSize: 100_000,
+      mediaKind: request.expectedKind,
+      durationSeconds: 20,
+    };
+  }
+}
+
 describe('inspect episode use case', () => {
   it('binds a private local source without granting it synthesis authority', async () => {
-    const inspection = await inspectEpisode('ignored.json', 'ignored.local.json', {
-      episodes: new PreparedEpisodeRepository(),
-      bindings: new PreparedLocalBindingsRepository(),
-      documents: new PreparedDocumentProbe(),
-    });
+    const directory = await mkdtemp(path.join(os.tmpdir(), 'visual-learning-episode-'));
+    await mkdir(path.join(directory, 'audio'));
+    await writeFile(path.join(directory, 'audio/voice.m4a'), 'placeholder');
+    const artifacts = new PreparedArtifactProbe();
 
-    expect(inspection.readiness.currentStage).toBe('sources_ready');
-    expect(inspection.documents['source.prototype']?.pageCount).toBe(20);
+    try {
+      const inspection = await inspectEpisode('ignored.json', 'ignored.local.json', {
+        episodes: new PreparedEpisodeRepository(directory),
+        bindings: new PreparedLocalBindingsRepository(),
+        documents: new PreparedDocumentProbe(directory),
+        artifacts,
+      });
+
+      expect(inspection.readiness.currentStage).toBe('sources_ready');
+      expect(inspection.documents['source.prototype']?.pageCount).toBe(20);
+      expect(inspection.artifacts['audio/voice.m4a']?.byteSize).toBe(100_000);
+      expect(artifacts.requests).toEqual([
+        {
+          absolutePath: await realpath(path.join(directory, 'audio/voice.m4a')),
+          expectedKind: 'audio',
+          maxByteSize: 1_073_741_824,
+        },
+      ]);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it.each(['/etc/hosts', '../outside.m4a'])(
+    'does not inspect a manifest artifact path outside the episode directory: %s',
+    async (artifactPath) => {
+      const parent = await mkdtemp(path.join(os.tmpdir(), 'visual-learning-containment-'));
+      const directory = path.join(parent, 'episode');
+      await mkdir(directory);
+      await writeFile(path.join(parent, 'outside.m4a'), 'outside');
+      const artifacts = new PreparedArtifactProbe();
+
+      try {
+        const inspection = await inspectEpisode('ignored.json', 'ignored.local.json', {
+          episodes: new PreparedEpisodeRepository(directory, artifactPath),
+          bindings: new PreparedLocalBindingsRepository(),
+          documents: new PreparedDocumentProbe(directory),
+          artifacts,
+        });
+
+        expect(artifacts.requests).toEqual([]);
+        expect(inspection.artifacts).toEqual({});
+        expect(inspection.readiness.blockers.map((item) => item.code)).toContain(
+          'audio.artifact_unobserved',
+        );
+      } finally {
+        await rm(parent, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it('does not follow an in-directory symlink to an artifact outside the episode directory', async () => {
+    const parent = await mkdtemp(path.join(os.tmpdir(), 'visual-learning-symlink-'));
+    const directory = path.join(parent, 'episode');
+    await mkdir(path.join(directory, 'audio'), { recursive: true });
+    await writeFile(path.join(parent, 'outside.m4a'), 'outside');
+    await symlink(path.join(parent, 'outside.m4a'), path.join(directory, 'audio/voice.m4a'));
+    const artifacts = new PreparedArtifactProbe();
+
+    try {
+      const inspection = await inspectEpisode('ignored.json', 'ignored.local.json', {
+        episodes: new PreparedEpisodeRepository(directory),
+        bindings: new PreparedLocalBindingsRepository(),
+        documents: new PreparedDocumentProbe(directory),
+        artifacts,
+      });
+
+      expect(artifacts.requests).toEqual([]);
+      expect(inspection.artifacts).toEqual({});
+    } finally {
+      await rm(parent, { recursive: true, force: true });
+    }
   });
 });

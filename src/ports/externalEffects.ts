@@ -1,4 +1,6 @@
 import type { EditorialModule, NarrativeBeat, ScriptSegment } from '../editorial/contracts.js';
+import { digestJson } from '../shared/digest.js';
+import type { VoiceRenderReceipt } from './artifactProbe.js';
 import type { ProductionModule } from '../production/contracts.js';
 import type {
   PublicationObservation,
@@ -34,6 +36,10 @@ export interface VoiceRenderRequest {
   readonly outputPath: string;
 }
 
+export function voiceRenderRequestDigest(request: VoiceRenderRequest): string {
+  return digestJson(request);
+}
+
 export interface RenderObservation {
   readonly outputPath: string;
   readonly contentDigest: string;
@@ -42,7 +48,7 @@ export interface RenderObservation {
 }
 
 export interface VoiceRenderPort {
-  render(request: VoiceRenderRequest): Promise<RenderObservation>;
+  render(request: VoiceRenderRequest): Promise<VoiceRenderReceipt>;
 }
 
 export interface VideoRenderRequest {
